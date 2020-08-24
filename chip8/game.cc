@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <getopt.h>
 #include <signal.h>
+#include <deque>
 
 using rgb_matrix::RGBMatrix;
 using rgb_matrix::Canvas;
@@ -40,11 +41,14 @@ class Chip8 {
   public:
     unsigned short drawFlag;
     unsigned char gfx[64][32];    // Graphics: 64x32px B&W screen; array holds pixel state (1 or 0)
-    
+    std::deque<std::pair<int, int>> graphics;
+    bool clearScreen;
+
     void init();
     void loadGame(char* program);
     void emulate();
     void setKeys(const char key);
+    void clearKeys();
 };
 
 /* * * * * * * * * * * * * * * * * * *
@@ -198,6 +202,7 @@ void Chip8::emulate()
               gfx[i][j] = 0;
             }
           }
+          clearScreen = true;
           pc += 2;
           break;
 
@@ -347,7 +352,6 @@ void Chip8::emulate()
       // VF = 1 if collisions occur, 0 if none
       {
         unsigned short height = opcode & 0x000F;
-        // unsigned short width = 8;
         unsigned short pixel, posX, posY;
         V[0xF] = 0;
 
@@ -356,15 +360,16 @@ void Chip8::emulate()
 
           for (int xCoord = 0 ; xCoord < 8 ; xCoord++) {
 
-            if (pixel & (0x80 >> xCoord)) {     // Cycles all 8px of width
+            if (pixel & (0x80 >> xCoord)) { // Cycles all 8px of width
               posX = (V[X] + xCoord);
               posY = (V[Y] + yCoord);
 
-              if (gfx[posX][posY] == 1) {     // Check for collisions
+              if (gfx[posX][posY] == 1) {   // Check for collisions
                 V[0xF] = 1;
               }
 
-              gfx[posX][posY] ^= 1;         // Draw to screen
+              gfx[posX][posY] ^= 1;             // Draw to screen
+              graphics.push_back({posX, posY});
             }
           }
         }
@@ -379,6 +384,7 @@ void Chip8::emulate()
         case 0x9E: // EX9E: skips next instr if key stored in VX is pressed
           if (key[V[X]] == PRESSED) {
             pc += 4;
+            key[V[X]] = UNPRESSED;
           } else {
             pc += 2;
           }
@@ -389,6 +395,7 @@ void Chip8::emulate()
             pc += 4;
           } else {
             pc += 2;
+            key[V[X]] = UNPRESSED;
           }
           break;
 
@@ -529,38 +536,44 @@ void Chip8::setKeys(const char keypress) {
   }
 }
 
+void Chip8::clearKeys() {
+  for (int i = 0; i < 16; i++) {
+    key[i] = UNPRESSED;
+  }
+}
+
 // volatile bool interrupt_received = false;
 // static void InterruptHandler(int signo) {
 //   interrupt_received = true;
 // }
 
-// Retrieve input from cmdline; taken from pixel-mover.cc
+// Retrieve input from cmdline (nonblocking!)
 static char getch() {
   static bool is_terminal = isatty(STDIN_FILENO);
 
   struct termios old;
   if (is_terminal) {
-  if (tcgetattr(0, &old) < 0)
-    perror("tcsetattr()");
+    if (tcgetattr(0, &old) < 0)   // stores details abt terminal in termios
+      perror("tcsetattr()");
 
-  // Set to unbuffered mode
-  struct termios no_echo = old;
-  no_echo.c_lflag &= ~ICANON;
-  no_echo.c_lflag &= ~ECHO;
-  no_echo.c_cc[VMIN] = 1;
-  no_echo.c_cc[VTIME] = 0;
-  if (tcsetattr(0, TCSANOW, &no_echo) < 0)
-    perror("tcsetattr ICANON");
+    // Set to unbuffered mode
+    struct termios no_echo = old; 
+    no_echo.c_lflag &= ~ICANON; // canonical input (erase + kill processing)
+    // no_echo.c_lflag &= ~ECHO;   // input chars echoed back to terminal
+    no_echo.c_cc[VMIN] = 0;
+    no_echo.c_cc[VTIME] = 0.1;
+    if (tcsetattr(0, TCSANOW, &no_echo) < 0)
+      perror("tcsetattr ICANON");
   }
 
   char buf = 0;
   if (read(STDIN_FILENO, &buf, 1) < 0)
-  perror ("read()");
+    perror ("read()");
 
   if (is_terminal) {
-  // Back to original terminal settings.
-  if (tcsetattr(0, TCSADRAIN, &old) < 0)
-    perror ("tcsetattr ~ICANON");
+    // Back to original terminal settings.
+    if (tcsetattr(0, TCSADRAIN, &old) < 0)
+      perror ("tcsetattr ~ICANON");
   }
 
   return buf;
@@ -601,33 +614,34 @@ int main(int argc, char* argv[]) {
 //   signal(SIGTERM, InterruptHandler);
 //   signal(SIGINT, InterruptHandler);
 
-  canvas->Fill(0, 0, 255);
-  canvas->SetPixel(4, 20, 255, 1, 1);
-  usleep(5000);  // wait a little to slow down things.
-  canvas->Clear();
+  // canvas->Fill(0, 0, 255);
+  // canvas->SetPixel(4, 20, 255, 1, 1);
+  // usleep(5000);  // wait a little to slow down things.
+  // canvas->Clear();
 
   while (running) {
-    if (emulator.drawFlag) {
+    if (emulator.clearScreen) {
       canvas->Clear();
-      for (int y = 0; y < 32; y++) {
-        for (int x = 0; x < 64; x++) {
-          if (emulator.gfx[x][y]) {
-            canvas->SetPixel(x, y, 0, 255, 0);
-          }
+      emulator.clearScreen = false;
+    }
+
+    if (emulator.drawFlag) {
+      for (const auto &pos : emulator.graphics) {
+        if (emulator.gfx[pos.first][pos.second]) {
+          canvas->SetPixel(pos.first, pos.second, 0, 255, 0);
+        } else {
+          canvas->SetPixel(pos.first, pos.second, 0, 0, 0);
         }
       }
+      emulator.graphics.clear();
     }
 
     emulator.emulate(); // runs 1 cpu cycle
 
     // this handles keypresses, but not keydepresses
     // pressing and holding will likely be very finicky
-    char keypress;
-    while (keypress != '\0') {
-      keypress = tolower(getch());
-      emulator.setKeys(keypress);
-      keypress = '\0';
-    }
+    const char keypress = tolower(getch());
+    emulator.setKeys(keypress);
   }
 
   std::cout << "See you later! Thanks for playing." << std::endl;
