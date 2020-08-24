@@ -492,7 +492,18 @@ void Chip8::emulate()
       exit(EXIT_FAILURE);
   }
 
-  // SDL_Delay(1);
+  if (delay_timer > 0) {
+      delay_timer--;
+  }
+
+  if (sound_timer > 0) {
+    sound_timer--;
+    if (sound_timer == 1) {
+      // Mix_PlayChannel(-1, beep, 0);
+    }
+  }
+
+  usleep(1000); // temporary
 }
 
 // Determines keypresses
@@ -518,10 +529,10 @@ void Chip8::setKeys(const char keypress) {
   }
 }
 
-volatile bool interrupt_received = false;
-static void InterruptHandler(int signo) {
-  interrupt_received = true;
-}
+// volatile bool interrupt_received = false;
+// static void InterruptHandler(int signo) {
+//   interrupt_received = true;
+// }
 
 // Retrieve input from cmdline; taken from pixel-mover.cc
 static char getch() {
@@ -558,6 +569,11 @@ static char getch() {
 // MAIN BITCH
 int main(int argc, char* argv[]) {
   // const bool output_is_terminal = isatty(STDOUT_FILENO);
+  //   printf("%sX,Y = %d,%d%s",
+  //          output_is_terminal ? "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b" : "",
+  //          x_pos, y_pos,
+  //          output_is_terminal ? " " : "\n");
+  //   fflush(stdout);
 
   Chip8 emulator;
 
@@ -567,6 +583,7 @@ int main(int argc, char* argv[]) {
   
   bool running = true;
 
+  // for reasons known only to god, removing this sad face prevents the matrix from displaying.
   printf(":(\n");
 
   RGBMatrix::Options defaults;
@@ -576,7 +593,7 @@ int main(int argc, char* argv[]) {
   defaults.brightness = 50;
   defaults.chain_length = 1;
   defaults.parallel = 1;
-  defaults.show_refresh_rate = true;
+  // defaults.show_refresh_rate = true;
   Canvas *canvas = RGBMatrix::CreateFromFlags(&argc, &argv, &defaults);
   if (canvas == NULL)
     return 1;
@@ -584,16 +601,14 @@ int main(int argc, char* argv[]) {
 //   signal(SIGTERM, InterruptHandler);
 //   signal(SIGINT, InterruptHandler);
 
-//   std::cout << "bruh" << std::endl;
-
   canvas->Fill(0, 0, 255);
   canvas->SetPixel(4, 20, 255, 1, 1);
   usleep(5000);  // wait a little to slow down things.
   canvas->Clear();
 
-  while (!interrupt_received && running) {
+  while (running) {
     if (emulator.drawFlag) {
-    //   canvas->Clear();
+      canvas->Clear();
       for (int y = 0; y < 32; y++) {
         for (int x = 0; x < 64; x++) {
           if (emulator.gfx[x][y]) {
