@@ -29,7 +29,7 @@ emulate : emulate.o $(RGB_LIBRARY)
 c-example : c-example.o $(RGB_LIBRARY)
 	$(CC) $< -o $@ $(LDFLAGS) -lstdc++
 
-emulate.o : chip8/game.cc
+emulate.o : game.cc
 	$(CXX) -I$(RGB_INCDIR) $(CXXFLAGS) -c -o $@ $<
 
 clean:
