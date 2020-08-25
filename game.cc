@@ -48,7 +48,6 @@ class Chip8 {
     void loadGame();
     void emulate();
     void setKeys(const char key);
-    void clearKeys();
     void timerTick();
 };
 
@@ -141,26 +140,38 @@ void Chip8::init()
   return;
 }
 
-// Load game into program memory
+// Select and load game into program memory
 void Chip8::loadGame()
 {
-  std::string games[] = {"15Puzzle", "Blinky", "Blitz", "Brix", "Chipquarium", "Connect4", "GlitchGhost", "Guess", 
+  // Game select
+  std::string games[] = { "15Puzzle", "Blinky", "Blitz", "Brix", "Chipquarium", "Connect4", "GlitchGhost", "Guess", 
           "Hidden", "Invaders", "Kaleid", "Maze", "Merlin", "Missile", "Octo", "Octorancher", "Pong1", 
           "Pong2", "Puzzle", "Snake", "Spaceflight", "Syzygy", "Tank", "Tetris", "Tictac",
-          "UFO", "Vbrix", "Vers", "Wipeoff"};
-  std::cout << "What would you like to play?" << std::endl;
-  for (unsigned int i = 0; i < sizeof(games)/sizeof(games[0]); i++) {
-    std::cout << i << "   " << games[i] << std::endl;
+          "UFO", "Vbrix", "Vers", "Wipeoff" };
+  int gameCount = sizeof(games)/sizeof(games[0]);
+
+  std::cout << "\u001b[31mSelect a game or press ESC to quit\u001b[0m" << std::endl;
+  for (int i = 0; i < gameCount; i++) {
+    std::cout << "[" << i << "]" << "\t" << games[i] << std::endl;
   }
 
+  // Get valid user input
   int usrSelect;
-  fscanf(stdin, "%d", &usrSelect);
+  while (1) {
+    std::cin >> usrSelect;
+    if (!std::cin.fail() && usrSelect < gameCount) {
+      break;
+    } else {
+      std::cout << "\u001b[31mEnter a valid integer input (0-" << gameCount - 1 << ")\u001b[0m" << std::endl;
+      std::cin.clear();
+      std::cin.ignore(1000, '\n');
+    }
+  }
 
   std::string gameSelect = "roms/" + games[usrSelect];
-
   FILE * game = fopen(gameSelect.c_str(), "rb");
   if (game == NULL) {
-    std::cout << "Oh no! loadgame() cannot open file " << gameSelect << std::endl;
+    std::cout << "ERROR: loadgame() cannot open file " << gameSelect << std::endl;
     exit(EXIT_FAILURE);
   }
 
@@ -508,8 +519,6 @@ void Chip8::emulate()
       std::cout << "Oh no! Unknown opcode 0x" << std::hex << opcode << std::endl;
       exit(EXIT_FAILURE);
   }
-
-
 }
 
 // Determines keypresses
@@ -535,12 +544,6 @@ void Chip8::setKeys(const char keypress) {
   }
 }
 
-void Chip8::clearKeys() {
-  for (int i = 0; i < 16; i++) {
-    key[i] = UNPRESSED;
-  }
-}
-
 // Delay & sound timers are 60Hz
 void Chip8::timerTick() {
   if (delay_timer > 0) {
@@ -555,10 +558,10 @@ void Chip8::timerTick() {
   }
 }
 
-// volatile bool interrupt_received = false;
-// static void InterruptHandler(int signo) {
-//   interrupt_received = true;
-// }
+volatile bool interrupt_received = false;
+static void InterruptHandler(int signo) {
+  interrupt_received = true;
+}
 
 // Retrieve input from cmdline (nonblocking!)
 static char getch() {
@@ -594,38 +597,35 @@ static char getch() {
 
 // MAIN BITCH
 int main(int argc, char* argv[]) {
-  // const bool output_is_terminal = isatty(STDOUT_FILENO);
-  //   printf("%sX,Y = %d,%d%s",
-  //          output_is_terminal ? "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b" : "",
-  //          x_pos, y_pos,
-  //          output_is_terminal ? " " : "\n");
-  //   fflush(stdout);
-
   int cpuSpeed = DEFAULT_CPU_RATE;
   int sleepTime = DEFAULT_SLEEP_TIME;
+  int red = 121;
+  int green = 125;
+  int blue = 98;
 
   // Retrieves command line options
-  // -t timerspeed
-  // -d delay time (seconds)
+  // -t <speed>   timer speed
+  // -d <time>    timer delay ( input * 1000 )
+  // -c <r,g,b>   display color
   int opt;
-  while ((opt = getopt(argc, argv, "t:")) != -1) {
+  while ((opt = getopt(argc, argv, "t:d:c:")) != -1) {
     switch (opt) {
     case 't':
       cpuSpeed = atoi(optarg);
       break;
     case 'd':
       sleepTime = atoi(optarg);
+      break;
+    case 'c':
+      sscanf(optarg, "%d,%d,%d", &red, &green, &blue);
+      break;
     default:
       break;
     }
   }
-
-  Chip8 emulator;
-  emulator.init();
-  emulator.loadGame();
   
   RGBMatrix::Options defaults;
-  defaults.hardware_mapping = "regular";  // or e.g. "adafruit-hat"
+  defaults.hardware_mapping = "regular";
   defaults.rows = 32;
   defaults.cols = 64;
   defaults.brightness = 50;
@@ -635,11 +635,32 @@ int main(int argc, char* argv[]) {
   if (canvas == NULL)
     return 1;
 
-//   signal(SIGTERM, InterruptHandler);
-//   signal(SIGINT, InterruptHandler);
+  Chip8 emulator;
+  emulator.init();
+  emulator.loadGame();
+  // bool load = true;
 
+  signal(SIGTERM, InterruptHandler);
+  signal(SIGINT, InterruptHandler);
   bool running = true;
-  while (running) {
+
+  while (!interrupt_received && running) {
+    // Load (or reload) (currently broken)
+    // if (load) {
+    //   canvas->Clear();
+    //   emulator.init();
+    //   emulator.loadGame();
+    //   load = false;
+    // }
+
+    // Prevents user's keypresses from spamming the terminal
+    const bool output_is_terminal = isatty(STDOUT_FILENO);
+    printf("%s%s",
+           output_is_terminal ? "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b" : "",
+           output_is_terminal ? " " : "\n");
+    fflush(stdout);
+
+    // Graphics handling
     if (emulator.clearScreen) {
       canvas->Clear();
       emulator.clearScreen = false;
@@ -648,25 +669,30 @@ int main(int argc, char* argv[]) {
     if (emulator.drawFlag) {
       for (const auto &pos : emulator.graphics) {
         if (emulator.gfx[pos.first][pos.second]) {
-          canvas->SetPixel(pos.first, pos.second, 25, 28, 120);
+          canvas->SetPixel(pos.first, pos.second, red, green, blue);
         } else {
           canvas->SetPixel(pos.first, pos.second, 0, 0, 0);
         }
       }
-      emulator.graphics.clear();
     }
 
-    // test: 9 cycles before drawing a frame
+    // Extremely wonky timing + keypress stuff
     for (int i = 0; i < cpuSpeed; i++) {
       const char keypress = tolower(getch());
+
+      // if (keypress == 0x1B) {   // Esc: return to game select menu
+      //   load = true;
+      //   break;
+      // }
+
       emulator.setKeys(keypress);
       emulator.emulate();
     }
     emulator.timerTick();
-    usleep(sleepTime * 1000); // temporary
+    usleep((sleepTime * 1000));
   }
 
-  std::cout << "See you later! Thanks for playing." << std::endl;
+  std::cout << "\nSee you later! Thanks for playing." << std::endl;
   canvas->Clear();
   delete canvas;
   exit(EXIT_SUCCESS);
